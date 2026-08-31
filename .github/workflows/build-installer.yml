@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  build-msi:
+  build-exe:
     runs-on: windows-latest
 
     steps:
@@ -27,62 +27,53 @@ jobs:
           dotnet publish Lucy-windows-installer.csproj
           --configuration Release
           --runtime win-x64
-          --self-contained false
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
           --output publish
 
-      - name: Install WiX Toolset
+      - name: Rename executable
         shell: pwsh
         run: |
-          dotnet tool install --global wix
-          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          wix extension add -g WixToolset.Util.wixext
+          $executable = Get-ChildItem -Path publish -Filter *.exe | Select-Object -First 1
+          if ($null -eq $executable) {
+            throw "The published executable was not found."
+          }
+          Rename-Item -Path $executable.FullName -NewName "Lucy.exe"
 
-      - name: Create WiX source
+      - name: Package executable
         shell: pwsh
         run: |
-          wix heat dir publish `
-            -cg LucyApplication `
-            -dr INSTALLFOLDER `
-            -var var.PublishDir `
-            -gg `
-            -srd `
-            -sreg `
-            -out harvest.wxs
+          if (-not (Test-Path "publish\Lucy.exe")) {
+            throw "Lucy.exe was not found after publishing."
+          }
 
-          @'
-          <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-            <Package
-              Name="Lucy"
-              Manufacturer="Sentience Robotics"
-              Version="1.0.0.0"
-              UpgradeCode="{B2E7ACD6-2A9D-4F45-8B86-0D0C1E9A1F2B}"
-              Scope="perMachine">
-              <MajorUpgrade DowngradeErrorMessage="A newer version of Lucy is already installed." />
-              <MediaTemplate EmbedCab="yes" />
-              <Feature Id="LucyApplication" Title="Lucy" Level="1">
-                <ComponentGroupRef Id="LucyApplication" />
-              </Feature>
-            </Package>
+          Compress-Archive `
+            -Path "publish\Lucy.exe" `
+            -DestinationPath "Lucy-installer-exe.zip" `
+            -CompressionLevel Optimal `
+            -Force
 
-            <Fragment>
-              <StandardDirectory Id="ProgramFiles6432Folder">
-                <Directory Id="INSTALLFOLDER" Name="Lucy" />
-              </StandardDirectory>
-            </Fragment>
-          </Wix>
-          '@ | Set-Content -Path product.wxs -Encoding utf8
+          if (-not (Test-Path "Lucy-installer-exe.zip")) {
+            throw "The executable archive was not created."
+          }
 
-      - name: Build MSI
-        shell: pwsh
-        run: |
-          wix build product.wxs harvest.wxs `
-            -ext WixToolset.Util.wixext `
-            -d PublishDir="$PWD\publish" `
-            -o Lucy.msi
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead("$PWD\Lucy-installer-exe.zip")
+          try {
+            if ($archive.Entries.Count -ne 1 -or $archive.Entries[0].Name -ne "Lucy.exe") {
+              throw "The executable archive contents are invalid."
+            }
+          }
+          finally {
+            $archive.Dispose()
+          }
 
-      - name: Upload MSI artifact
+      - name: Upload executable archive
         uses: actions/upload-artifact@v4
         with:
-          name: Lucy-installer
-          path: Lucy.msi
+          name: Lucy-installer-exe
+          path: Lucy-installer-exe.zip
+          compression-level: 0
           if-no-files-found: error
