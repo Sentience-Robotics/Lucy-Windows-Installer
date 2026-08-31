@@ -1,0 +1,88 @@
+name: Build Windows installer
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-msi:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish application
+        run: >
+          dotnet publish Lucy-windows-installer.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained false
+          --output publish
+
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          wix extension add -g WixToolset.Util.wixext
+
+      - name: Create WiX source
+        shell: pwsh
+        run: |
+          wix heat dir publish `
+            -cg LucyApplication `
+            -dr INSTALLFOLDER `
+            -var var.PublishDir `
+            -gg `
+            -srd `
+            -sreg `
+            -out harvest.wxs
+
+          @'
+          <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+            <Package
+              Name="Lucy"
+              Manufacturer="Sentience Robotics"
+              Version="1.0.0.0"
+              UpgradeCode="{B2E7ACD6-2A9D-4F45-8B86-0D0C1E9A1F2B}"
+              Scope="perMachine">
+              <MajorUpgrade DowngradeErrorMessage="A newer version of Lucy is already installed." />
+              <MediaTemplate EmbedCab="yes" />
+              <Feature Id="LucyApplication" Title="Lucy" Level="1">
+                <ComponentGroupRef Id="LucyApplication" />
+              </Feature>
+            </Package>
+
+            <Fragment>
+              <StandardDirectory Id="ProgramFiles6432Folder">
+                <Directory Id="INSTALLFOLDER" Name="Lucy" />
+              </StandardDirectory>
+            </Fragment>
+          </Wix>
+          '@ | Set-Content -Path product.wxs -Encoding utf8
+
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          wix build product.wxs harvest.wxs `
+            -ext WixToolset.Util.wixext `
+            -d PublishDir="$PWD\publish" `
+            -o Lucy.msi
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lucy-installer
+          path: Lucy.msi
+          if-no-files-found: error

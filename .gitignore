@@ -1,0 +1,6 @@
+@"
+.vs/
+bin/
+obj/
+*.user
+"@ | Set-Content .gitignore
