@@ -16,8 +16,7 @@ namespace Lucy_windows_installer
 
         private static readonly List<string> COMMANDS = new()
         {
-            "pixi install",
-            "pixi run build"
+            "python .\\install.py",
         };
 
         private int _pageIndex = 0;
@@ -385,6 +384,13 @@ namespace Lucy_windows_installer
             _installationCompleted = false;
             UpdatePageVisibility();
 
+            if (!await EnsureRequiredToolsAsync())
+            {
+                _isInstalling = false;
+                UpdatePageVisibility();
+                return;
+            }
+
             string selectedFolder = InstallPathTextBox.Text?.Trim() ?? "";
             if (string.IsNullOrEmpty(selectedFolder))
             {
@@ -572,9 +578,93 @@ namespace Lucy_windows_installer
             System.Windows.MessageBox.Show("Installation complete.", "Done", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
+        private async Task<bool> EnsureRequiredToolsAsync()
+        {
+            var missing = new List<string>();
+
+            AppendLog("Checking required tools...");
+
+            if (!await IsPythonAvailableAsync())
+                missing.Add("Python");
+            if (!await IsBuildToolsInstalledAsync())
+                missing.Add("Microsoft Visual Studio 2022 Build Tools");
+            if (!await IsCommandAvailableAsync("pixi"))
+                missing.Add("pixi");
+
+            if (missing.Count == 0)
+            {
+                AppendLog("All required tools are available.");
+                return true;
+            }
+
+            var missingText = string.Join(", ", missing);
+            var result = System.Windows.MessageBox.Show(
+                $"The following required tools are missing: {missingText}. Would you like the installer to install them automatically?",
+                "Missing prerequisites",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+            if (result != MessageBoxResult.Yes)
+            {
+                AppendLog("User declined installing missing prerequisites.");
+                return false;
+            }
+
+            if (!await IsPythonAvailableAsync())
+            {
+                AppendLog("Installing Python...");
+                bool pythonInstalled = await RunProcessAsync(
+                    "winget",
+                    "install Python.Python.3 -e --accept-source-agreements --accept-package-agreements",
+                    Environment.CurrentDirectory,
+                    AppendLog);
+                if (!pythonInstalled)
+                {
+                    System.Windows.MessageBox.Show("Could not install Python. See the log for details.", "Python installation failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return false;
+                }
+            }
+
+            if (!await IsBuildToolsInstalledAsync())
+            {
+                AppendLog("Installing Visual Studio Build Tools...");
+                bool buildToolsInstalled = await RunProcessAsync(
+                    "winget",
+                    "install Microsoft.VisualStudio.2022.BuildTools --override \"--quiet --wait --norestart --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64\" --accept-source-agreements --accept-package-agreements",
+                    Environment.CurrentDirectory,
+                    AppendLog);
+                if (!buildToolsInstalled)
+                {
+                    System.Windows.MessageBox.Show("Could not install Visual Studio Build Tools. See the log for details.", "Build Tools installation failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return false;
+                }
+            }
+
+            if (!await IsCommandAvailableAsync("pixi"))
+            {
+                AppendLog("Installing pixi...");
+                bool pixiInstalled = await RunProcessAsync(
+                    "powershell.exe",
+                    "-NoProfile -ExecutionPolicy Bypass -Command \"irm https://pixi.sh/install.ps1 | iex\"",
+                    Environment.CurrentDirectory,
+                    AppendLog);
+                if (!pixiInstalled)
+                {
+                    System.Windows.MessageBox.Show("Could not install pixi. See the log for details.", "pixi installation failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return false;
+                }
+            }
+
+            if (!await IsPythonAvailableAsync() || !await IsBuildToolsInstalledAsync() || !await IsCommandAvailableAsync("pixi"))
+            {
+                System.Windows.MessageBox.Show("One or more required tools are still unavailable after installation. Please check the log and try again.", "Prerequisites not ready", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return false;
+            }
+
+            return true;
+        }
+
         private async Task<string> EnsurePixiInstalledAsync()
         {
-            AppendLog("Checking whether pixi is installed...");
             if (await IsCommandAvailableAsync("pixi"))
             {
                 AppendLog("pixi is already installed.");
@@ -615,6 +705,34 @@ namespace Lucy_windows_installer
             return string.Empty;
         }
 
+        private static async Task<bool> IsPythonAvailableAsync()
+        {
+            return await IsCommandAvailableAsync("python") || await IsCommandAvailableAsync("py");
+        }
+
+        private static async Task<bool> IsBuildToolsInstalledAsync()
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "winget",
+                Arguments = "list --id Microsoft.VisualStudio.2022.BuildTools --exact",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            SanitizeEnvironment(psi);
+            using var process = Process.Start(psi);
+            if (process is null)
+                return false;
+            var output = await process.StandardOutput.ReadToEndAsync();
+            var error = await process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+            return process.ExitCode == 0 &&
+                   (output.Contains("Microsoft.VisualStudio.2022.BuildTools", StringComparison.OrdinalIgnoreCase)
+                    || error.Contains("Microsoft.VisualStudio.2022.BuildTools", StringComparison.OrdinalIgnoreCase));
+        }
+
         private static async Task<bool> IsCommandAvailableAsync(string command)
         {
             var psi = new ProcessStartInfo
@@ -626,6 +744,7 @@ namespace Lucy_windows_installer
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+            SanitizeEnvironment(psi);
             using var process = Process.Start(psi);
             if (process is null)
                 return false;
@@ -668,7 +787,7 @@ namespace Lucy_windows_installer
                     UseShellExecute = false,
                     CreateNoWindow = true
                 };
-
+                SanitizeEnvironment(psi);
                 using var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
 
                 bool started = proc.Start();
@@ -691,6 +810,24 @@ namespace Lucy_windows_installer
                 InvokeOnUi(() => onOutput($"Process error: {ex.Message}"));
                 return false;
             }
+        }
+
+        private static void SanitizeEnvironment(ProcessStartInfo psi)
+        {
+            // Pull the freshest possible values, not the stale inherited ones
+            string machinePath = Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.Machine) ?? "";
+            string userPath = Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.User) ?? "";
+
+            string combined = machinePath + ";" + userPath;
+
+            // Strip any stray newlines/carriage returns and empty/garbage entries
+            var cleanEntries = combined
+                .Split(new[] { ';', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(p => p.Trim())
+                .Where(p => p.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+
+            psi.EnvironmentVariables["Path"] = string.Join(";", cleanEntries);
         }
 
         private async Task ReadProcessOutputAsync(StreamReader reader, Action<string> onOutput)

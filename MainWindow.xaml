@@ -20,8 +20,35 @@
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Background" Value="#4d4d4d"/>
+                                <Setter Property="Foreground" Value="#d9d9d9"/>
+                                <Setter Property="BorderBrush" Value="#4d4d4d"/>
+                            </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="Button" x:Key="PrimaryButtonStyle">
+            <Setter Property="Background" Value="#00ff41"/>
+            <Setter Property="Foreground" Value="#000000"/>
+            <Setter Property="BorderBrush" Value="#00ff41"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Background" Value="#4d4d4d"/>
+                                <Setter Property="Foreground" Value="#d9d9d9"/>
+                                <Setter Property="BorderBrush" Value="#4d4d4d"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -214,7 +241,7 @@
         <!-- Navigation buttons -->
         <StackPanel Orientation="Horizontal" Grid.Row="2" HorizontalAlignment="Right" Margin="0,12,10,10">
             <Button Name="BackButton" Width="70" Padding="6,3" Click="BackButton_Click" IsEnabled="False" Margin="0,0,8,0" Style="{StaticResource SecondaryButtonStyle}">Back</Button>
-            <Button Name="NextButton" Width="70" Padding="6,3" Click="NextButton_Click" Background="#00ff41" Foreground="#000000" FontWeight="Bold">Next</Button>
+            <Button Name="NextButton" Width="70" Padding="6,3" Click="NextButton_Click" FontWeight="Bold" Style="{StaticResource PrimaryButtonStyle}">Next</Button>
             <Button Name="CancelButton" Width="70" Padding="6,3" Click="CancelButton_Click" Margin="8,0,0,0" Style="{StaticResource SecondaryButtonStyle}">Cancel</Button>
         </StackPanel>
     </Grid>
