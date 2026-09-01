@@ -9,11 +9,13 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>assets\logo.ico</ApplicationIcon>
 
   </PropertyGroup>
 
   <ItemGroup>
     <Resource Include="assets\logo.png" />
+    <Content Include="assets\logo.ico" />
   </ItemGroup>
 
 </Project>
