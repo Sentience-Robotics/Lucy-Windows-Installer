@@ -1,8 +1,8 @@
 ﻿<Window x:Class="Lucy_windows_installer.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Lucy Installer" Height="350" Width="750"
-        Background="#141414" Foreground="#FFFFFF"
+        Title="Lucy Installer" Height="500" Width="1000"
+        Background="#141414" Foreground="#141414"
         WindowStyle="None"
         ResizeMode="NoResize"
         Icon="/assets/logo.png"
@@ -28,7 +28,6 @@
                 </Setter.Value>
             </Setter>
         </Style>
-
         <Style TargetType="ComboBox" x:Key="DarkComboBoxStyle">
             <Setter Property="Background" Value="#141414"/>
             <Setter Property="Foreground" Value="#FFFFFF"/>
@@ -132,7 +131,6 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <!-- <Image Source="/assets/logo.png" Width="16" Height="16" Margin="0,0,8,0"/> -->
                     <TextBlock Text="Lucy Installer" Foreground="#00ff41" FontWeight="Bold" VerticalAlignment="Center" FontSize="18"/>
                 </StackPanel>
 
@@ -176,13 +174,13 @@
                         </StackPanel>
 
                         <StackPanel Name="BranchSelectionPanel" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,12">
-                            <Button Name="LoadBranchesButton" Click="LoadBranchesButton_Click" Width="120" Padding="6,3" Background="#00ff41" Foreground="#000000" FontWeight="Bold">Refresh branches</Button>
+                            <Button Name="LoadBranchesButton" Click="LoadBranchesButton_Click" Width="120" Padding="6,3" Background="#00ff41" Foreground="#000000" FontWeight="Bold">Refresh</Button>
                             <TextBlock Text=" " Width="8"/>
                             <ComboBox Name="BranchesComboBox" Width="300" IsEditable="False" DisplayMemberPath="Name" Style="{StaticResource DarkComboBoxStyle}"/>
                         </StackPanel>
 
                         <StackPanel Name="TagSelectionPanel" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,12" Visibility="Collapsed">
-                            <Button Name="LoadTagsButton" Click="LoadTagsButton_Click" Width="120" Padding="6,3" Background="#00ff41" Foreground="#000000" FontWeight="Bold">Refresh tags</Button>
+                            <Button Name="LoadTagsButton" Click="LoadTagsButton_Click" Width="120" Padding="6,3" Background="#00ff41" Foreground="#000000" FontWeight="Bold">Refresh</Button>
                             <TextBlock Text=" " Width="8"/>
                             <ComboBox Name="TagsComboBox" Width="300" IsEditable="False" DisplayMemberPath="Name" Style="{StaticResource DarkComboBoxStyle}"/>
                         </StackPanel>

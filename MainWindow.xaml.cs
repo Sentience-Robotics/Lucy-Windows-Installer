@@ -22,6 +22,9 @@ namespace Lucy_windows_installer
 
         private int _pageIndex = 0;
         private readonly List<UIElement> _pages = new();
+        private bool _isInstalling;
+        private bool _installationCompleted;
+        private string _pixiExecutable = "pixi";
 
         public MainWindow()
         {
@@ -88,10 +91,10 @@ namespace Lucy_windows_installer
                 _pages[i].Visibility = (i == _pageIndex) ? Visibility.Visible : Visibility.Collapsed;
             }
 
-            BackButton.IsEnabled = _pageIndex > 0;
+            BackButton.IsEnabled = _pageIndex > 0 && !_isInstalling;
             BackButton.Visibility = _pageIndex > 0 ? Visibility.Visible : Visibility.Collapsed;
-            NextButton.IsEnabled = true;
             NextButton.Content = (_pageIndex == _pages.Count - 1) ? "Finish" : "Next";
+            NextButton.IsEnabled = _pageIndex != _pages.Count - 1 || _installationCompleted;
         }
 
         private void BackButton_Click(object sender, RoutedEventArgs e)
@@ -129,6 +132,9 @@ namespace Lucy_windows_installer
 
         private async void NextButton_Click(object sender, RoutedEventArgs e)
         {
+            if (_isInstalling)
+                return;
+
             if (_pageIndex == 1)
             {
                 if (AdvancedConfigCheckbox.IsChecked == true)
@@ -375,11 +381,16 @@ namespace Lucy_windows_installer
         #region Clone and run commands
         private async Task RunCloneAndCommandsAsync()
         {
+            _isInstalling = true;
+            _installationCompleted = false;
+            UpdatePageVisibility();
+
             string selectedFolder = InstallPathTextBox.Text?.Trim() ?? "";
             if (string.IsNullOrEmpty(selectedFolder))
             {
                 System.Windows.MessageBox.Show("Please select an install location.", "No location", MessageBoxButton.OK, MessageBoxImage.Warning);
                 _pageIndex = 1; // go back to location
+                _isInstalling = false;
                 UpdatePageVisibility();
                 return;
             }
@@ -396,6 +407,7 @@ namespace Lucy_windows_installer
             {
                 System.Windows.MessageBox.Show("No commands configured.", "No commands", MessageBoxButton.OK, MessageBoxImage.Warning);
                 _pageIndex = 2;
+                _isInstalling = false;
                 UpdatePageVisibility();
                 return;
             }
@@ -418,6 +430,8 @@ namespace Lucy_windows_installer
             {
                 AppendLog($"Failed to create target folder: {ex.Message}");
                 System.Windows.MessageBox.Show($"Cannot create target folder: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                _isInstalling = false;
+                UpdatePageVisibility();
                 return;
             }
 
@@ -433,20 +447,32 @@ namespace Lucy_windows_installer
                 if (res != MessageBoxResult.Yes)
                 {
                     AppendLog("User cancelled due to existing folder.");
+                    _isInstalling = false;
+                    UpdatePageVisibility();
                     return;
                 }
 
                 try
                 {
-                    Directory.Delete(cloneTarget, true);
+                    DeleteDirectoryWithRetry(cloneTarget);
                     Directory.CreateDirectory(cloneTarget);
                 }
                 catch (Exception ex)
                 {
                     AppendLog($"Failed to remove existing folder: {ex.Message}");
                     System.Windows.MessageBox.Show($"Cannot remove existing folder: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    _isInstalling = false;
+                    UpdatePageVisibility();
                     return;
                 }
+            }
+
+            _pixiExecutable = await EnsurePixiInstalledAsync();
+            if (string.IsNullOrEmpty(_pixiExecutable))
+            {
+                _isInstalling = false;
+                UpdatePageVisibility();
+                return;
             }
 
             if (useTag)
@@ -455,6 +481,7 @@ namespace Lucy_windows_installer
                 var archivePath = Path.Combine(targetFolder, $"{repo}-{selectedRef}.zip");
                 var extractionPath = Path.Combine(targetFolder, ".lucy-release-extract");
                 AppendLog($"Downloading release tag {selectedRef}...");
+                ProgressBar.Value = 10;
 
                 try
                 {
@@ -478,17 +505,21 @@ namespace Lucy_windows_installer
                     Directory.Delete(extractionPath, true);
                     File.Delete(archivePath);
                     cloneTarget = targetFolder;
+                    ProgressBar.Value = 30;
                 }
                 catch (Exception ex)
                 {
                     AppendLog($"Tag archive failed: {ex.Message}");
                     System.Windows.MessageBox.Show($"Failed to download or extract selected release tag: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    _isInstalling = false;
+                    UpdatePageVisibility();
                     return;
                 }
             }
             else
             {
                 AppendLog($"Starting clone: {REPO_URL}");
+                ProgressBar.Value = 10;
                 var cloneArgs = selectedRef is null ? $"clone \"{REPO_URL}\"" : $"clone --branch \"{selectedRef}\" \"{REPO_URL}\"";
                 bool cloneSuccess = await RunProcessAsync("git", $"{cloneArgs} \"{cloneTarget}\"", targetFolder, output => AppendLog(output));
 
@@ -496,10 +527,13 @@ namespace Lucy_windows_installer
                 {
                     AppendLog("Clone failed. Aborting.");
                     System.Windows.MessageBox.Show("Git clone failed. See logs for details.", "Clone failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                    _isInstalling = false;
+                    UpdatePageVisibility();
                     return;
                 }
 
                 AppendLog("Clone completed.");
+                ProgressBar.Value = 30;
             }
 
             // Run post-clone commands from inside the new repository
@@ -508,10 +542,14 @@ namespace Lucy_windows_installer
             {
                 var cmd = COMMANDS[i].Trim();
                 if (string.IsNullOrEmpty(cmd)) continue;
-                string repoCommand = $"cd /d \"{cloneTarget}\" && {cmd}";
-                ProgressBar.Value = (i * 100.0 / Math.Max(1, total));
+                string command = cmd.StartsWith("pixi ", StringComparison.OrdinalIgnoreCase)
+                    ? $"\"{_pixiExecutable}\"{cmd[4..]}"
+                    : cmd;
+                string repoCommand = $"cd /d \"{cloneTarget}\" && {command}";
+                ProgressBar.Value = 30 + (i * 70.0 / Math.Max(1, total));
                 AppendLog($"> Executing: {cmd}");
                 bool ok = await RunProcessAsync("cmd.exe", $"/c \"{repoCommand}\"", targetFolder, output => AppendLog(output));
+                ProgressBar.Value = 30 + ((i + 1) * 70.0 / Math.Max(1, total));
                 if (!ok)
                 {
                     AppendLog($"Command failed: {cmd}");
@@ -519,6 +557,8 @@ namespace Lucy_windows_installer
                     if (res != MessageBoxResult.Yes)
                     {
                         AppendLog("Aborted by user after failed command.");
+                        _isInstalling = false;
+                        UpdatePageVisibility();
                         return;
                     }
                 }
@@ -526,7 +566,92 @@ namespace Lucy_windows_installer
 
             ProgressBar.Value = 100;
             AppendLog("All steps completed.");
+            _isInstalling = false;
+            _installationCompleted = true;
+            UpdatePageVisibility();
             System.Windows.MessageBox.Show("Installation complete.", "Done", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private async Task<string> EnsurePixiInstalledAsync()
+        {
+            AppendLog("Checking whether pixi is installed...");
+            if (await IsCommandAvailableAsync("pixi"))
+            {
+                AppendLog("pixi is already installed.");
+                return "pixi";
+            }
+
+            var result = System.Windows.MessageBox.Show(
+                "pixi is not installed. Would you like the installer to install it automatically?",
+                "pixi is required",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+            if (result != MessageBoxResult.Yes)
+            {
+                AppendLog("pixi installation was declined.");
+                return string.Empty;
+            }
+
+            AppendLog("Installing pixi...");
+            bool installed = await RunProcessAsync(
+                "powershell.exe",
+                "-NoProfile -ExecutionPolicy Bypass -Command \"irm https://pixi.sh/install.ps1 | iex\"",
+                Environment.CurrentDirectory,
+                AppendLog);
+            if (!installed)
+            {
+                System.Windows.MessageBox.Show("Could not install pixi. See the log for details.", "pixi installation failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                return string.Empty;
+            }
+
+            if (await IsCommandAvailableAsync("pixi"))
+                return "pixi";
+
+            string installedPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pixi", "bin", "pixi.exe");
+            if (File.Exists(installedPath))
+                return installedPath;
+
+            System.Windows.MessageBox.Show("pixi was installed but could not be found. Restart the installer and try again.", "pixi not found", MessageBoxButton.OK, MessageBoxImage.Error);
+            return string.Empty;
+        }
+
+        private static async Task<bool> IsCommandAvailableAsync(string command)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "where.exe",
+                Arguments = command,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var process = Process.Start(psi);
+            if (process is null)
+                return false;
+            await process.WaitForExitAsync();
+            return process.ExitCode == 0;
+        }
+
+        private static void DeleteDirectoryWithRetry(string path)
+        {
+            const int maxAttempts = 3;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                try
+                {
+                    foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+                        File.SetAttributes(file, FileAttributes.Normal);
+                    foreach (var directory in Directory.EnumerateDirectories(path, "*", SearchOption.AllDirectories))
+                        File.SetAttributes(directory, FileAttributes.Directory);
+                    Directory.Delete(path, true);
+                    return;
+                }
+                catch when (attempt < maxAttempts)
+                {
+                    Thread.Sleep(500);
+                }
+            }
         }
 
         private async Task<bool> RunProcessAsync(string fileName, string arguments, string workingDirectory, Action<string> onOutput)
@@ -546,9 +671,6 @@ namespace Lucy_windows_installer
 
                 using var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
 
-                proc.OutputDataReceived += (s, e) => { if (e.Data != null) InvokeOnUi(() => onOutput(e.Data)); };
-                proc.ErrorDataReceived += (s, e) => { if (e.Data != null) InvokeOnUi(() => onOutput(e.Data)); };
-
                 bool started = proc.Start();
                 if (!started)
                 {
@@ -556,19 +678,25 @@ namespace Lucy_windows_installer
                     return false;
                 }
 
-                proc.BeginOutputReadLine();
-                proc.BeginErrorReadLine();
-
-                await Task.Run(() => proc.WaitForExit());
+                Task outputTask = ReadProcessOutputAsync(proc.StandardOutput, onOutput);
+                Task errorTask = ReadProcessOutputAsync(proc.StandardError, onOutput);
+                await Task.WhenAll(proc.WaitForExitAsync(), outputTask, errorTask);
 
                 InvokeOnUi(() => onOutput($"Process exited with code {proc.ExitCode}"));
                 return proc.ExitCode == 0;
             }
+
             catch (Exception ex)
             {
                 InvokeOnUi(() => onOutput($"Process error: {ex.Message}"));
                 return false;
             }
+        }
+
+        private async Task ReadProcessOutputAsync(StreamReader reader, Action<string> onOutput)
+        {
+            while (await reader.ReadLineAsync() is { } line)
+                InvokeOnUi(() => onOutput(line));
         }
         #endregion
 
