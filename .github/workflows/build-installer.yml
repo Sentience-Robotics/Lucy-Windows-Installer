@@ -44,8 +44,8 @@ jobs:
       - name: Verify executable
         shell: pwsh
         run: |
-          if (-not (Test-Path "publish\Lucy.exe")) {
-            throw "Lucy.exe was not found after publishing."
+          if (-not (Test-Path "publish\Lucy-install.exe")) {
+            throw "Lucy-install.exe was not found after publishing."
           }
 
       - name: Create or update GitHub Release
@@ -65,7 +65,7 @@ jobs:
             }
           }
 
-          gh release upload $tag publish\Lucy.exe --clobber
+          gh release upload $tag publish\Lucy-install.exe --clobber
           if ($LASTEXITCODE -ne 0) {
             throw "Could not upload Lucy.exe to the GitHub release."
           }
