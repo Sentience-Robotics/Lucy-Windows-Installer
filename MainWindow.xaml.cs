@@ -16,7 +16,7 @@ namespace Lucy_windows_installer
 
         private static readonly List<string> COMMANDS = new()
         {
-            "python .\\install.py",
+            "python3 Lucy.py",
         };
 
         private int _pageIndex = 0;
