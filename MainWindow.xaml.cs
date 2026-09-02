@@ -13,10 +13,12 @@ namespace Lucy_windows_installer
     {
         private const string REPO_URL = "https://github.com/Sentience-Robotics/lucy_ws.git";
         private const string INSTALL_FOLDER_NAME = "Lucy";
+        private const string WINDOWS_LAUNCHER_URL = "https://github.com/Sentience-Robotics/Lucy-windows-launcher/releases/latest/download/Lucy.exe";
 
         private static readonly List<string> COMMANDS = new()
         {
             "python3 Lucy.py",
+            "curl -L -o Lucy.exe https://github.com/Sentience-Robotics/Lucy-windows-launcher/releases/latest/download/Lucy.exe"
         };
 
         private int _pageIndex = 0;
@@ -24,6 +26,7 @@ namespace Lucy_windows_installer
         private bool _isInstalling;
         private bool _installationCompleted;
         private string _pixiExecutable = "pixi";
+        private string? _downloadedLauncherPath;
 
         public MainWindow()
         {
@@ -384,13 +387,6 @@ namespace Lucy_windows_installer
             _installationCompleted = false;
             UpdatePageVisibility();
 
-            if (!await EnsureRequiredToolsAsync())
-            {
-                _isInstalling = false;
-                UpdatePageVisibility();
-                return;
-            }
-
             string selectedFolder = InstallPathTextBox.Text?.Trim() ?? "";
             if (string.IsNullOrEmpty(selectedFolder))
             {
@@ -408,6 +404,13 @@ namespace Lucy_windows_installer
                 : Path.Combine(selectedFolder, INSTALL_FOLDER_NAME);
 
             InstallPathTextBox.Text = targetFolder;
+
+            if (!await EnsureRequiredToolsAsync())
+            {
+                _isInstalling = false;
+                UpdatePageVisibility();
+                return;
+            }
 
             if (COMMANDS.Count == 0)
             {
@@ -542,6 +545,15 @@ namespace Lucy_windows_installer
                 ProgressBar.Value = 30;
             }
 
+            if (!string.IsNullOrWhiteSpace(_downloadedLauncherPath) && File.Exists(_downloadedLauncherPath))
+            {
+                var launcherPath = Path.Combine(cloneTarget, "Lucy.exe");
+                File.Copy(_downloadedLauncherPath, launcherPath, true);
+                File.Delete(_downloadedLauncherPath);
+                _downloadedLauncherPath = null;
+                AppendLog($"Downloaded Windows launcher to {launcherPath}.");
+            }
+
             // Run post-clone commands from inside the new repository
             int total = COMMANDS.Count;
             for (int i = 0; i < total; i++)
@@ -621,6 +633,28 @@ namespace Lucy_windows_installer
                 {
                     System.Windows.MessageBox.Show("Could not install Python. See the log for details.", "Python installation failed", MessageBoxButton.OK, MessageBoxImage.Error);
                     return false;
+                }
+
+                if (OperatingSystem.IsWindows())
+                {
+                    _downloadedLauncherPath = Path.Combine(Path.GetTempPath(), $"Lucy-{Guid.NewGuid():N}.exe");
+                    AppendLog("Downloading the latest Lucy Windows launcher...");
+                    using var client = new HttpClient();
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("Lucy-windows-installer");
+                    try
+                    {
+                        using var response = await client.GetAsync(WINDOWS_LAUNCHER_URL);
+                        response.EnsureSuccessStatusCode();
+                        await using var source = await response.Content.ReadAsStreamAsync();
+                        await using var destination = File.Create(_downloadedLauncherPath);
+                        await source.CopyToAsync(destination);
+                        AppendLog("Lucy Windows launcher download completed.");
+                    }
+                    catch (Exception ex)
+                    {
+                        AppendLog($"Lucy Windows launcher download failed: {ex.Message}");
+                        return false;
+                    }
                 }
             }
 

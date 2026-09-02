@@ -39,7 +39,7 @@ jobs:
           if ($null -eq $executable) {
             throw "The published executable was not found."
           }
-          Rename-Item -Path $executable.FullName -NewName "Lucy.exe"
+          Rename-Item -Path $executable.FullName -NewName "Lucy-install.exe"
 
       - name: Verify executable
         shell: pwsh
